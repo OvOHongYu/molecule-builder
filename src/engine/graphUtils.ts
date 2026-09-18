@@ -126,3 +126,38 @@ export function subgraphKeep(
     nextBondId: graph.nextBondId,
   }
 }
+
+/**
+ * 合并多张图为单图（多连通分量），原子与键编号整体平移避免碰撞。
+ * 用于反应预测把多个反应物当作一个「反应体系」做跨分子 SMARTS 匹配。
+ *
+ * 注意：nextAtomId / nextBondId 必须按**最大编号 + 1** 计算，不能用「原子个数 + 1」。
+ * 分子图的编号删除后不回收（见 types/molecule.ts），个数往往小于最大编号；
+ * 若按个数计算，后续 addAtom 会生成与既有原子重复的 id，导致变换静默失败。
+ */
+export function mergeGraphs(graphs: MoleculeGraph[]): MoleculeGraph {
+  const atoms: MoleculeGraph['atoms'] = []
+  const bonds: MoleculeGraph['bonds'] = []
+  let offA = 0
+  let offB = 0
+  let maxA = 0
+  let maxB = 0
+  for (const g of graphs) {
+    for (const a of g.atoms) {
+      atoms.push({ ...a, atom_id: a.atom_id + offA })
+      if (a.atom_id + offA > maxA) maxA = a.atom_id + offA
+    }
+    for (const b of g.bonds) {
+      bonds.push({
+        ...b,
+        bond_id: b.bond_id + offB,
+        atom1_id: b.atom1_id + offA,
+        atom2_id: b.atom2_id + offA,
+      })
+      if (b.bond_id + offB > maxB) maxB = b.bond_id + offB
+    }
+    offA = maxA
+    offB = maxB
+  }
+  return { atoms, bonds, nextAtomId: maxA + 1, nextBondId: maxB + 1 }
+}

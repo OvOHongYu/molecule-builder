@@ -660,3 +660,763 @@ button.active {
 .toast.error {
   background: #b42318;
 }
+
+/* ============================================================
+   反应模块（反应模块设计方案 §5、§7.6、§9.3、§10.4）
+   ============================================================ */
+
+/* ---------- 顶层视图切换 ---------- */
+.mode-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: #f2f4f7;
+  border-radius: 999px;
+}
+
+.mode-switch button {
+  border: none;
+  background: transparent;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #475467;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #fff;
+  color: #1a1a1a;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+/* ---------- 反应式画布 ---------- */
+.scheme-canvas {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background:
+    radial-gradient(circle at 1px 1px, #d4d4d8 1px, transparent 1px) 0 0 / 24px 24px,
+    #fafafa;
+  overflow: auto;
+}
+
+.scheme-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.scheme-hint {
+  font-size: 11px;
+  color: #667085;
+}
+
+.balance-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.balance-badge.ok {
+  background: #e7f6ec;
+  color: #087443;
+}
+
+.balance-badge.bad {
+  background: #fdeceb;
+  color: #b42318;
+}
+
+.scheme-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 16px;
+  padding: 20px 28px;
+  min-width: min-content;
+}
+
+.scheme-empty {
+  color: #98a2b3;
+  font-size: 13px;
+  padding: 40px 0;
+}
+
+.scheme-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scheme-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scheme-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scheme-plus {
+  font-size: 17px;
+  color: #344054;
+  padding: 0 4px;
+}
+
+/* 组分卡片 */
+.scheme-comp {
+  position: relative;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 6px 0;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.scheme-comp:hover {
+  border-color: #98c1f9;
+}
+
+.scheme-comp.selected {
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.14);
+}
+
+.comp-drawing {
+  width: 168px;
+  height: 132px;
+}
+
+.comp-coeff {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  min-width: 20px;
+  height: 20px;
+  border: 1px solid #e3e6ea;
+  border-radius: 4px;
+  background: #f9fafb;
+  font-size: 12px;
+  font-weight: 600;
+  color: #344054;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.comp-coeff input {
+  width: 34px;
+  height: 18px;
+  border: 1px solid #1f6feb;
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.comp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-top: 1px solid #f2f4f7;
+  padding: 3px 4px;
+  font-size: 11px;
+  color: #667085;
+}
+
+.comp-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.comp-actions button {
+  border: none;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.comp-actions button:hover {
+  background: #f2f4f7;
+}
+
+.comp-actions button.danger:hover {
+  background: #fdeceb;
+  color: #b42318;
+}
+
+/* 箭头与条件 */
+.scheme-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 150px;
+  gap: 2px;
+}
+
+.arrow-above,
+.arrow-below {
+  font-size: 12px;
+  color: #344054;
+  text-align: center;
+  max-width: 200px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.arrow-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 130px;
+  color: #1a1a1a;
+}
+
+.arrow-line svg {
+  flex: 1;
+  height: 24px;
+}
+
+.arrow-symbol {
+  font-size: 13px;
+  color: #98a2b3;
+}
+
+/* 试剂列表 */
+.scheme-agents {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+}
+
+.scheme-agents-title {
+  font-size: 11px;
+  color: #667085;
+  margin-right: 2px;
+}
+
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f2f4f7;
+  border-radius: 999px;
+  padding: 2px 6px 2px 10px;
+  font-size: 12px;
+  color: #344054;
+}
+
+.chip-x {
+  border: none;
+  background: transparent;
+  color: #98a2b3;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.chip-x:hover {
+  color: #b42318;
+}
+
+/* ---------- 试剂与条件面板 ---------- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tabs button {
+  flex: 1;
+  border: 1px solid #e3e6ea;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 12px;
+  color: #475467;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+.reagent-search {
+  width: 100%;
+  border: 1px solid #e3e6ea;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.cat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.cat-row button {
+  border: 1px solid #e3e6ea;
+  background: #fff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #475467;
+  cursor: pointer;
+}
+
+.cat-row button.active {
+  background: #eef4ff;
+  border-color: #98c1f9;
+  color: #1f6feb;
+  font-weight: 600;
+}
+
+.reagent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.reagent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 7px;
+  cursor: pointer;
+}
+
+.reagent-item:hover {
+  background: #f2f4f7;
+}
+
+.reagent-item strong {
+  font-size: 12px;
+  color: #1a1a1a;
+}
+
+.reagent-sub {
+  font-size: 11px;
+  color: #667085;
+}
+
+.reagent-cat {
+  font-size: 10px;
+  color: #98a2b3;
+}
+
+.empty-hint {
+  font-size: 11px;
+  color: #98a2b3;
+  padding: 8px 6px;
+}
+
+/* ---------- 预测面板 ---------- */
+.pred-note {
+  margin-top: 8px;
+  padding: 7px 9px;
+  background: #fff8e6;
+  border: 1px solid #f5d98a;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #7a5b00;
+  line-height: 1.5;
+}
+
+.pred-section {
+  margin-top: 12px;
+  border-top: 1px solid #f2f4f7;
+  padding-top: 8px;
+}
+
+.pred-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.pred-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.pred-tag.a {
+  background: #eef4ff;
+  color: #1f6feb;
+}
+
+.pred-tag.b {
+  background: #f4f0ff;
+  color: #6941c6;
+}
+
+.pred-tag.c {
+  background: #fff3e6;
+  color: #b54708;
+}
+
+.pred-tag.ext {
+  background: #eef7f0;
+  color: #087443;
+}
+
+.pred-count {
+  font-size: 11px;
+  color: #98a2b3;
+}
+
+.pred-explain {
+  font-size: 11px;
+  color: #667085;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.pred-card {
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.pred-card.qualitative {
+  border-left: 3px solid #6941c6;
+}
+
+.pred-card.polymer {
+  border-left: 3px solid #b54708;
+}
+
+.pred-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.pred-card-head strong {
+  font-size: 12px;
+}
+
+.pred-cat {
+  font-size: 10px;
+  color: #667085;
+  background: #f2f4f7;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.pred-structures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.pred-structure {
+  border: 1px solid #f2f4f7;
+  border-radius: 6px;
+  background: #fcfcfd;
+  padding: 2px;
+  text-align: center;
+}
+
+.pred-structure svg {
+  width: 118px;
+  height: 88px;
+}
+
+.pred-formula {
+  display: block;
+  font-size: 10px;
+  color: #667085;
+}
+
+.pred-why {
+  margin: 0 0 6px;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #667085;
+  line-height: 1.5;
+}
+
+.pred-conclusion {
+  font-size: 12px;
+  color: #1a1a1a;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.pred-phenomenon,
+.pred-repeat,
+.pred-equation {
+  font-size: 11px;
+  color: #475467;
+  line-height: 1.5;
+  margin-bottom: 3px;
+}
+
+.repeat-loading {
+  font-size: 11px;
+  color: #98a2b3;
+  padding: 4px 0;
+}
+
+.pred-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.pred-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+/* ---------- 反应右面板控件 ---------- */
+.cond-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0;
+}
+
+.cond-field > span {
+  width: 58px;
+  font-size: 11px;
+  color: #667085;
+  flex-shrink: 0;
+}
+
+.cond-field input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #e3e6ea;
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.cond-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin: 6px 0;
+}
+
+.cond-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cond-grid label span {
+  font-size: 10px;
+  color: #98a2b3;
+}
+
+.cond-grid input {
+  border: 1px solid #e3e6ea;
+  border-radius: 5px;
+  padding: 3px 5px;
+  font-size: 12px;
+  width: 100%;
+}
+
+.balance-line {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.balance-line.ok {
+  color: #087443;
+}
+
+.balance-line.bad {
+  color: #b42318;
+}
+
+.balance-line.muted {
+  color: #98a2b3;
+  font-weight: 400;
+}
+
+.balance-elements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.balance-elements .ok {
+  color: #087443;
+}
+
+.balance-elements .bad {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.mini-library {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.mini-library li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 5px;
+}
+
+.mini-library li:hover {
+  background: #f9fafb;
+}
+
+.ml-name {
+  font-size: 11px;
+  color: #344054;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-actions {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.ml-actions button {
+  border: 1px solid #e3e6ea;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 2px 5px;
+  cursor: pointer;
+  color: #475467;
+}
+
+.ml-actions button:hover {
+  border-color: #98c1f9;
+  color: #1f6feb;
+}
+
+/* ---------- 外部后端设置 ---------- */
+.ext-settings {
+  margin-top: 6px;
+}
+
+.toggle-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #344054;
+  margin-bottom: 6px;
+}
+
+.small-note.warn {
+  background: #fff8e6;
+  border: 1px solid #f5d98a;
+  border-radius: 5px;
+  padding: 5px 7px;
+  color: #7a5b00;
+  margin-bottom: 6px;
+}
+
+/* 反应模式下状态栏提示替换 */
+.mode-reaction .statusbar .reaction-hint {
+  color: #1f6feb;
+}
+
+/* ---------- PDF 导出：打印样式表 ---------- */
+/* 只保留反应式内容，隐藏全部 UI 外壳（顶栏/面板/状态栏/浮层/热区） */
+@media print {
+  body.printing-reaction .topbar,
+  body.printing-reaction .left-panel,
+  body.printing-reaction .right-panel,
+  body.printing-reaction .statusbar,
+  body.printing-reaction .toast,
+  body.printing-reaction .modal-backdrop,
+  body.printing-reaction .scheme-toolbar,
+  body.printing-reaction .scheme-agents,
+  body.printing-reaction .comp-meta,
+  body.printing-reaction .comp-coeff,
+  body.printing-reaction .pred-section,
+  body.printing-reaction .pred-extra {
+    display: none !important;
+  }
+
+  body.printing-reaction .scheme-canvas {
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  body.printing-reaction .scheme-body {
+    padding: 0 !important;
+    gap: 10px !important;
+  }
+
+  body.printing-reaction .scheme-comp {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    /* 打印时取消选中态描边，避免把 UI 状态带进 PDF */
+    outline: none !important;
+  }
+
+  body.printing-reaction .comp-drawing {
+    width: 150px !important;
+    height: 120px !important;
+  }
+}
+
+@page {
+  margin: 12mm;
+}

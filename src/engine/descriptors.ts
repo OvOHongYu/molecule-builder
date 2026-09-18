@@ -1,39 +1,42 @@
 /**
- * 描述符：分子式、重原子计数（设计文档 §9.1 实时命名输出）。
+ * 描述符：分子式、重原子计数、元素计数（设计文档 §9.1 实时命名输出）。
  */
 import type { MoleculeGraph } from '../types/molecule'
-import { bondsOfAtom } from './graphUtils'
+
+/**
+ * 元素计数（Hill 记法的唯一数据源）。
+ *
+ * 口径说明：`implicit_h` 由 `usedValence()` 计算，而该函数已把「显式 H 键」计入已用价，
+ * 因此显式连出的 H 原子不会重复出现在 `implicit_h` 里。故氢总数 =
+ * 「显式 H 原子个数（在 atoms 中逐个计数）+ 各原子 implicit_h 之和」，无需再单独补加。
+ */
+export function elementCounts(graph: MoleculeGraph): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const atom of graph.atoms) {
+    counts[atom.element] = (counts[atom.element] ?? 0) + 1
+    if (atom.implicit_h > 0) {
+      counts.H = (counts.H ?? 0) + atom.implicit_h
+    }
+  }
+  return counts
+}
 
 /** 分子式（Hill 记法：C、H 优先，其余按字母序；含形式电荷标记） */
 export function molecularFormula(graph: MoleculeGraph): string {
-  const counts = new Map<string, number>()
-  let totalCharge = 0
-  for (const atom of graph.atoms) {
-    totalCharge += atom.charge ?? 0
-    const bonds = bondsOfAtom(graph, atom.atom_id)
-    let h = atom.implicit_h
-    if (atom.element === 'C') {
-      // 显式连到该原子的 H 单独计数
-      const explicitH = bonds.filter((b) => {
-        const other = b.atom1_id === atom.atom_id ? b.atom2_id : b.atom1_id
-        return graph.atoms.find((a) => a.atom_id === other)?.element === 'H'
-      }).length
-      h += explicitH
-    }
-    counts.set(atom.element, (counts.get(atom.element) ?? 0) + 1)
-    if (h > 0) counts.set('H', (counts.get('H') ?? 0) + h)
-  }
+  const counts = elementCounts(graph)
+  const totalCharge = graph.atoms.reduce((s, a) => s + (a.charge ?? 0), 0)
   const order: string[] = []
-  if (counts.has('C')) order.push('C')
-  if (counts.has('H')) order.push('H')
-  for (const el of [...counts.keys()].sort()) {
+  if (counts.C) order.push('C')
+  if (counts.H) order.push('H')
+  for (const el of Object.keys(counts).sort()) {
     if (el !== 'C' && el !== 'H' && el !== '*') order.push(el)
   }
-  // 忽略未知元素
-  const parts = order.filter((el) => el !== '*' && counts.get(el)! > 0).map((el) => {
-    const n = counts.get(el)!
-    return n === 1 ? el : `${el}${n}`
-  })
+  const parts = order
+    .filter((el) => el !== '*' && (counts[el] ?? 0) > 0)
+    .map((el) => {
+      const n = counts[el]
+      return n === 1 ? el : `${el}${n}`
+    })
   let formula = parts.join('')
   if (totalCharge > 0) formula += `^${totalCharge}+`
   else if (totalCharge < 0) formula += `^${-totalCharge}-`

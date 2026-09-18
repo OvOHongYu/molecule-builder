@@ -1,12 +1,19 @@
 /**
  * 视图 store：画布平移缩放（viewBox），不动分子图坐标（设计文档 §8.4）。
+ * 同时承载顶层视图切换（分子构建器 / 反应）。
  */
 import { create } from 'zustand'
+
+/** 顶层视图：分子构建器 / 反应 */
+export type WorkMode = 'molecule' | 'reaction'
 
 interface ViewState {
   panX: number
   panY: number
   scale: number
+  /** 当前顶层视图 */
+  mode: WorkMode
+  setMode(mode: WorkMode): void
   setPan(x: number, y: number): void
   zoomAt(cx: number, cy: number, factor: number): void
   fit(bounds: { minX: number; minY: number; maxX: number; maxY: number }, viewW: number, viewH: number): void
@@ -17,6 +24,9 @@ export const useViewStore = create<ViewState>((set, get) => ({
   panX: 0,
   panY: 0,
   scale: 1,
+  mode: 'molecule',
+
+  setMode: (mode) => set({ mode }),
 
   setPan: (x, y) => set({ panX: x, panY: y }),
 

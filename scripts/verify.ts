@@ -1,13 +1,25 @@
 // 逻辑验证脚本：分子式 / 兜底 SMILES / 删除分支标签 / 中英文名（tsx 运行）
 import { resetEthane, addBond, addGroup, addAtom, deleteAtom, deleteBond, replaceAtomElement, setBondOrder, connectAtoms } from '../src/engine/moleculeOps'
 import { molecularFormula } from '../src/engine/descriptors'
-import { toFallbackSmiles } from '../src/engine/serialize'
+import { graphToMolblock, toFallbackSmiles } from '../src/engine/serialize'
 import { iupacName } from '../src/engine/iupac'
 import { isBenzeneLikeBond, isAromaticLikeBond } from '../src/engine/ring'
 import { carbonHasFunctionalH } from '../src/engine/functionalGroups'
 import { atomById } from '../src/engine/graphUtils'
 import { arrangeLayout } from '../src/layout/arrange'
 import { chineseName } from '../src/engine/chineseNamer'
+import { elementCounts } from '../src/engine/descriptors'
+import { balanceComponents } from '../src/engine/balance'
+import { toSubscript, toEquationText } from '../src/lib/formulaText'
+import { toRxn, toReactionSmiles } from '../src/engine/reactionSerialize'
+import { emptyScheme } from '../src/types/reaction'
+import { ALL_RULES, ruleStats } from '../src/data/rules'
+import { REAGENTS, findReagent } from '../src/data/reagents'
+import { runPredictionWithAllRules, combustionEquation } from '../src/engine/reactionPredict'
+import { canonicalSmilesWith, matchPatternsWith, smilesToGraphWith } from '../src/engine/smarts'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 function log(name: string, v: unknown): void {
   console.log(`${name} =`, v)
@@ -490,3 +502,282 @@ log(
   '双苯环 处理后残留芳香键数 (期望 6，另一环保持芳香)',
   twoOut.ok ? twoOut.graph.bonds.filter((b) => b.aromatic).length : -1,
 )
+
+/* ============================================================
+ * 反应模块验证（反应模块设计方案 §6、§8、§10）
+ * 说明：需要 RDKit 的部分统一放在 runReactionChecks()，
+ *       因为它必须等待 wasm 初始化；纯逻辑部分同步执行。
+ * ============================================================ */
+
+// —— 1) 元素计数口径：与分子式一致（H 不重复计数）——
+log('元素计数 乙烷 (期望 C:2, H:6)', JSON.stringify(elementCounts(resetEthane())))
+log('元素计数 乙醇 (期望 C:2, H:6, O:1)', JSON.stringify(elementCounts(r4.graph)))
+
+// —— 2) 配平算法 ——
+const bal = (name: string, r: Array<Record<string, number>>, p: Array<Record<string, number>>): void => {
+  const out = balanceComponents(r, p)
+  log(
+    `配平 ${name}`,
+    out.ok
+      ? `系数=[${[...out.reactantCoeffs, ...out.productCoeffs].join(',')}]${out.multiple ? ' (多解)' : ''}`
+      : `失败: ${out.message}`,
+  )
+}
+// 苯 + 3H₂ → 环己烷（系数 3 由守恒方程解出，非硬编码）
+bal('苯加氢 (期望 1,3,1)', [{ C: 6, H: 6 }, { H: 2 }], [{ C: 6, H: 12 }])
+// 乙醇燃烧（期望 1,3,2,3）
+bal('乙醇燃烧 (期望 1,3,2,3)', [{ C: 2, H: 6, O: 1 }, { O: 2 }], [{ C: 1, O: 2 }, { H: 2, O: 1 }])
+// 乙炔三聚（期望 3,1）
+bal('乙炔三聚 (期望 3,1)', [{ C: 2, H: 2 }], [{ C: 6, H: 6 }])
+// 不守恒必须报错
+bal('不守恒 (期望失败)', [{ C: 1, H: 4 }], [{ C: 2, H: 6 }])
+
+// —— 3) 下标渲染与方程式三变体 ——
+log('下标渲染 C2H6O (期望 C₂H₆O)', toSubscript('C2H6O'))
+log('下标渲染 带电荷 (期望 SO₄²⁻)', toSubscript('SO4^2-'))
+const eqInput = {
+  reactants: [{ formula: 'C2H6O', coefficient: 1 }, { formula: 'C2H4O2', coefficient: 1 }],
+  products: [{ formula: 'C4H8O2', coefficient: 1 }, { formula: 'H2O', coefficient: 1 }],
+  arrow: 'forward' as const,
+  aboveText: '浓H2SO4',
+  belowText: 'Δ',
+  balanced: true,
+}
+log('方程式 unicode', toEquationText(eqInput, 'unicode'))
+log('方程式 ascii', toEquationText(eqInput, 'ascii'))
+log('方程式 latex', toEquationText(eqInput, 'latex'))
+
+// —— 4) 规则集完整性（引用闭合 + 批次分布）——
+const rstats = ruleStats()
+log('规则总数 (期望 66)', rstats.total)
+log('规则分类统计', JSON.stringify(rstats.byKind))
+log('规则批次分布', JSON.stringify(rstats.byBatch))
+const ruleIdDup = ALL_RULES.length !== new Set(ALL_RULES.map((r) => r.id)).size
+log('规则 id 无重复 (期望 false)', ruleIdDup)
+// 规则引用的试剂 id 必须都存在于试剂库
+const missingAgentRefs = (() => {
+  const miss: string[] = []
+  for (const r of ALL_RULES) {
+    const ids = [
+      ...(r.agents?.required ?? []),
+      ...(r.agents?.anyOf?.flat() ?? []),
+      ...(r.agents?.exclude ?? []),
+      ...Object.keys(r.elementByAgent?.byAgent ?? {}),
+    ]
+    for (const id of ids) {
+      if (!findReagent(id)) miss.push(`${r.id}:${id}`)
+    }
+  }
+  return miss
+})()
+log('规则试剂引用全部存在 (期望空数组)', JSON.stringify(missingAgentRefs))
+// A 类规则必须有 transforms，B/C 类必须有对应字段
+log(
+  '规则字段与 kind 匹配 (期望 true)',
+  ALL_RULES.every((r) =>
+    r.kind === 'transform' ? !!r.transforms?.length : r.kind === 'qualitative' ? !!r.conclusion : !!r.polymer,
+  ),
+)
+
+// —— 5) RXN / 反应 SMILES 导出 ——
+const rxnScheme = (() => {
+  const s = emptyScheme()
+  return {
+    ...s,
+    reactants: [{ id: 'a', molecule: r4.graph, coefficient: 2 }],
+    products: [{ id: 'b', molecule: r3.graph, coefficient: 1 }],
+    agents: [{ id: 'g', text: 'Ni' }],
+  }
+})()
+const rxnText = toRxn(rxnScheme)
+log('RXN 头部 (期望含 $RXN)', rxnText.startsWith('$RXN'))
+// 2 个反应物 molblock（系数 2 展开）+ 1 个产物 molblock = 3 个 $MOL
+log('RXN $MOL 块数 (期望 3 = 系数2展开的2个反应物 + 1个产物)', (rxnText.match(/\$MOL/g) ?? []).length)
+log('RXN 含 M  END (期望 true)', rxnText.includes('M  END'))
+log('反应 SMILES 结构 (期望含 > 分隔)', toReactionSmiles(rxnScheme, (g) => toFallbackSmiles(g)))
+
+// —— 6) 回归：molblock 的键行必须用「原子块序号」而非内部 atom_id ——
+// 试跑时发现的真实缺陷：molblock 直接写 atom_id，导致任何经过删除的分子
+// （如由乙苯删出的苯，atom_id 为 3..8）导出后连接关系错乱、RDKit 无法解析。
+const idOffsetGraph = d2.graph // 苯，atom_id 为 3..8
+log('回归 分子 atom_id 不连续 (期望首个 id > 1)', idOffsetGraph.atoms[0].atom_id > 1)
+const offsetBondEnds = graphToMolblock(idOffsetGraph)
+  .split('\n')
+  .slice(4 + idOffsetGraph.atoms.length, -2) // 跳过头 4 行与原子块、结尾 M  END 与空行
+  .filter((l) => l.trim())
+  .flatMap((l) => [Number(l.slice(0, 3)), Number(l.slice(3, 6))])
+log('回归 键行端点均在 1..原子数 内 (期望 true)', offsetBondEnds.every((v) => v >= 1 && v <= idOffsetGraph.atoms.length))
+log(
+  '回归 键行端点不含原始 atom_id 越界值 (期望 true)',
+  offsetBondEnds.every((v) => v <= idOffsetGraph.atoms.length),
+)
+
+/* ============================================================
+ * 反应模块 · RDKit 相关验证（需等 wasm 初始化，故用异步 IIFE）
+ * 覆盖：SMARTS 原子索引约定、规则变换端到端、条件分流、A/B/C 分流
+ * ============================================================ */
+const require_ = createRequire(import.meta.url)
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const initRDKitModule = require_(join(ROOT, 'public', 'rdkit', 'RDKit_minimal.js'))
+
+/** 便捷构造：从分子图取 canonical SMILES */
+const csmiles = (mod: unknown, g: Parameters<typeof chineseName>[0]): string =>
+  canonicalSmilesWith(mod, g) ?? '(null)'
+
+// 反应模块专用底物
+const gBromoethane = (() => {
+  const r = addAtom(resetEthane(), 2, 'Br')
+  if (!r.ok) throw new Error(r.error)
+  return r.graph
+})()
+const gEthyne = (() => {
+  const r = setBondOrder(resetEthane(), 1, 3)
+  if (!r.ok) throw new Error(r.error)
+  return r.graph
+})()
+
+void (async () => {
+  try {
+    const mod = await initRDKitModule({ locateFile: (f: string) => join(ROOT, 'public', 'rdkit', f) })
+    log('RDKit 版本', mod.version())
+
+    // —— 7) SMARTS 原子索引约定回归（设计方案 §7.3 的核心前提）——
+    // 断言：matchPatternsWith 返回的 atomIds 按「SMARTS 原子顺序」排列，
+    // 且与 graph.atoms 数组下标一一对应。
+    const phe = r16.graph // 苯酚
+    const pheMatch = matchPatternsWith(mod, phe, 'c1ccccc1[OX2H1]', { 5: 'C1', 6: 'O' })
+    log('SMARTS 苯酚模式命中数 (期望 1)', pheMatch.length)
+    const lm = pheMatch[0]?.labels ?? {}
+    const ipsoAtom = phe.atoms.find((a) => a.atom_id === lm.C1)
+    log(
+      'SMARTS 下标 5 = 与 O 成键的环碳 (期望 true)',
+      !!ipsoAtom && phe.bonds.some((b) => b.atom1_id === lm.C1 && b.atom2_id === lm.O),
+    )
+    // 括号分支回归：[CX3](=O)[OX2H1] 的两个 O 应都连在同一个 C 上
+    const acid = r6.graph // 丙酸
+    const acidMatch = matchPatternsWith(mod, acid, '[CX3](=O)[OX2H1]', { 0: 'C', 1: 'O', 2: 'OH' })
+    const am = acidMatch[0]?.labels ?? {}
+    const bondedTo = (g: typeof acid, id: number): number[] =>
+      g.bonds.filter((b) => b.atom1_id === id || b.atom2_id === id).map((b) => (b.atom1_id === id ? b.atom2_id : b.atom1_id))
+    log(
+      'SMARTS 分支正确：两个 O 都连在同一 C 上 (期望 true)',
+      am.C !== undefined && bondedTo(acid, am.C).includes(am.O) && bondedTo(acid, am.C).includes(am.OH),
+    )
+    log(
+      'SMARTS 分支正确：O 与 OH 不同原子 (期望 true)',
+      am.O !== am.OH,
+    )
+
+    // —— 8) 规则预测端到端（A 类：结构变换）——
+    const cases: Array<{ name: string; reactants: unknown[]; agents: string[]; rule: string; expect: string }> = [
+      // 乙醇 + PCC → 乙醛
+      { name: '乙醇+PCC→乙醛', reactants: [r4.graph], agents: ['pcc'], rule: 'R-ALC-05', expect: 'CC=O' },
+      // 乙烯 + Br₂ → 1,2-二溴乙烷
+      { name: '乙烯+Br₂→1,2-二溴乙烷', reactants: [re1.graph], agents: ['br2'], rule: 'R-ENE-02', expect: 'BrCCBr' },
+      // 乙烯 + Cl₂ → 1,2-二氯乙烷（验证 $agent 元素解析随试剂变化）
+      { name: '乙烯+Cl₂→1,2-二氯乙烷', reactants: [re1.graph], agents: ['cl2'], rule: 'R-ENE-02', expect: 'ClCCCl' },
+      // 乙烯 + H₂/Ni → 乙烷
+      { name: '乙烯+H₂/Ni→乙烷', reactants: [re1.graph], agents: ['h2', 'ni'], rule: 'R-ENE-01', expect: 'CC' },
+      // 溴乙烷 + NaOH(aq) → 乙醇（水解）
+      { name: '溴乙烷+NaOH(aq)→乙醇', reactants: [gBromoethane], agents: ['naoh-aq'], rule: 'R-HAL-01', expect: 'CCO' },
+      // 溴乙烷 + NaOH(醇) → 乙烯（消去，验证条件分流）
+      { name: '溴乙烷+NaOH(EtOH)→乙烯', reactants: [gBromoethane], agents: ['naoh-etoh'], rule: 'R-HAL-02', expect: 'C=C' },
+      // 苯 + Br₂/FeBr₃ → 溴苯
+      { name: '苯+Br₂→溴苯', reactants: [d2.graph], agents: ['br2', 'febr3'], rule: 'R-ARE-01', expect: 'Brc1ccccc1' },
+      // 苯酚 + 浓溴水 → 2,4,6-三溴苯酚
+      { name: '苯酚+浓溴水→三溴苯酚', reactants: [r16.graph], agents: ['br2-water'], rule: 'R-PHE-03', expect: 'Oc1c(Br)cc(Br)cc1Br' },
+      // 苯酚 + NaOH → 苯酚钠（电荷处理）
+      { name: '苯酚+NaOH→苯酚钠', reactants: [r16.graph], agents: ['naoh-aq'], rule: 'R-PHE-01', expect: '[O-]c1ccccc1' },
+    ]
+    for (const c of cases) {
+      const res = runPredictionWithAllRules(mod, {
+        reactants: c.reactants as never,
+        agents: c.agents,
+      })
+      const hit = res.candidates.find((x) => x.ruleId === c.rule && x.kind === 'transform')
+      const smiles = hit?.products?.map((p) => csmiles(mod, p)).join(' + ') ?? '(未命中)'
+      log(`预测 ${c.name} [${c.rule}] (期望含 ${c.expect})`, smiles)
+    }
+
+    // —— 9) 条件分流：同一底物、不同试剂 → 不同产物 ——
+    const halHyd = runPredictionWithAllRules(mod, { reactants: [gBromoethane], agents: ['naoh-aq'] })
+    const halEli = runPredictionWithAllRules(mod, { reactants: [gBromoethane], agents: ['naoh-etoh'] })
+    log(
+      '条件分流：水解命中 HAL-01 且未命中 HAL-02 (期望 true)',
+      !!halHyd.candidates.find((c) => c.ruleId === 'R-HAL-01') &&
+        !halHyd.candidates.find((c) => c.ruleId === 'R-HAL-02'),
+    )
+    log(
+      '条件分流：消去命中 HAL-02 且未命中 HAL-01 (期望 true)',
+      !!halEli.candidates.find((c) => c.ruleId === 'R-HAL-02') &&
+        !halEli.candidates.find((c) => c.ruleId === 'R-HAL-01'),
+    )
+
+    // —— 10) A/B/C 三类分流 ——
+    // B 类：苯酚 + FeCl₃ → 定性结论，且不得进入产物侧
+    const qual = runPredictionWithAllRules(mod, { reactants: [r16.graph], agents: ['fecl3'] })
+    const qualHit = qual.candidates.find((c) => c.ruleId === 'R-PHE-04')
+    log('B 类 苯酚+FeCl₃ 命中定性结论 (期望 true)', !!qualHit && qualHit.kind === 'qualitative')
+    log('B 类 不含产物结构 (期望 true)', !!qualHit && !qualHit.products)
+    // B 类燃烧：可生成方程式
+    const burn = runPredictionWithAllRules(mod, { reactants: [re1.graph], agents: ['o2'] })
+    const burnHit = burn.candidates.find((c) => c.ruleId === 'R-ENE-07')
+    log('B 类 乙烯燃烧命中 (期望 true)', !!burnHit && burnHit.kind === 'qualitative')
+    log('B 类 乙烯燃烧方程式 (期望 2C2H4 + 6O₂ → 4CO₂ + 4H₂O 约简后为 C2H4+3O2→2CO2+2H2O)', combustionEquation([re1.graph]) || '(未生成)')
+    // C 类：乙烯加聚 → 聚合物，不得参与配平
+    const poly = runPredictionWithAllRules(mod, { reactants: [re1.graph], agents: [] })
+    const polyHit = poly.candidates.find((c) => c.ruleId === 'R-ENE-05')
+    log('C 类 乙烯加聚命中 (期望 true)', !!polyHit && polyHit.kind === 'polymer')
+    log('C 类 不含产物结构 (期望 true)', !!polyHit && !polyHit.products)
+
+    // —— 11) 跨分子反应：3 乙炔 → 苯（copies 机制）——
+    const tri = runPredictionWithAllRules(mod, { reactants: [gEthyne, gEthyne, gEthyne], agents: ['c-activated'] })
+    const triHit = tri.candidates.find((c) => c.ruleId === 'R-YNE-08')
+    log('跨分子 3 乙炔→苯 命中 (期望 true)', !!triHit)
+    log('跨分子 产物 (期望 C6H6)', triHit?.products?.map((p) => molecularFormula(p)).join('+') ?? '(未命中)')
+
+    // —— 12) 试剂库完整性 ——
+    log('试剂库条数', REAGENTS.length)
+    log('试剂库 id 无重复 (期望 false)', REAGENTS.length !== new Set(REAGENTS.map((r) => r.id)).size)
+
+    // —— 13) 回归：id 不连续分子的 molblock 必须能被 RDKit 正确解析 ——
+    // 若键行误用 atom_id（3..8），RDKit 会因连接错乱而解析失败或给出错误结构。
+    const offsetMol = mod.get_mol(graphToMolblock(idOffsetGraph))
+    log('回归 id 不连续分子 molblock 可被 RDKit 解析 (期望 true)', !!offsetMol)
+    log('回归 解析结果应为苯 (期望 c1ccccc1)', offsetMol ? offsetMol.get_smiles() : '(null)')
+    if (offsetMol) offsetMol.delete()
+    // 对照：乙酸（id 连续）也应正常
+    const acidMol = mod.get_mol(graphToMolblock(r6.graph))
+    log('回归 id 连续分子 molblock 可解析 (期望含 C(=O)O)', acidMol ? acidMol.get_smiles() : '(null)')
+    if (acidMol) acidMol.delete()
+
+    // —— 14) 关键正确性：烯烃规则不得作用于芳香环 ——
+    // molblock 导出时芳香键会转为凯库勒单双交替，若 RDKit 未识别为芳香，
+    // [CX3]=[CX3] 就会误命中苯环的双键（曾通过界面观察到该倾向，此处断言防止回归）。
+    const benAlkene = matchPatternsWith(mod, d2.graph, '[CX3]=[CX3]')
+    log('芳香环不被烯烃模式命中 (期望 0)', benAlkene.length)
+    const benAromatic = matchPatternsWith(mod, d2.graph, 'c1ccccc1')
+    log('芳香环被芳香模式命中 (期望 1)', benAromatic.length)
+    // 预测层同样不应给出苯的加聚/加卤素等烯烃候选
+    const benPred = runPredictionWithAllRules(mod, { reactants: [d2.graph], agents: ['br2'] })
+    log(
+      '苯 + Br₂ 的候选不含烯烃类规则 (期望 true)',
+      !benPred.candidates.some((c) => c.ruleId.startsWith('R-ENE-')),
+    )
+
+    // —— 15) SMILES → 分子图 往返（供试剂/外部结果接入）——
+    const gFromSmiles = smilesToGraphWith(mod, 'c1ccccc1O')
+    log('SMILES→分子图 解析成功 (期望 true)', !!gFromSmiles)
+    log(
+      'SMILES→分子图 元素组成应为 C6H6O (期望 C:6, H:6, O:1)',
+      gFromSmiles ? JSON.stringify(elementCounts(gFromSmiles)) : '(null)',
+    )
+    log(
+      'SMILES→分子图 再导出 SMILES 应一致 (期望 Oc1ccccc1)',
+      gFromSmiles ? (canonicalSmilesWith(mod, gFromSmiles) ?? '(null)') : '(null)',
+    )
+  } catch (e) {
+    console.error('反应模块 RDKit 验证失败:', e)
+  }
+})()
+

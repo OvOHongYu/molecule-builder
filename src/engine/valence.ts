@@ -22,10 +22,12 @@ export function baseValences(element: string): number[] {
   return BASE_VALENCE[element] ?? [1]
 }
 
-/** 形式电荷修正后的目标价：正电荷每 +1 价减 0/1 视元素；原型取保守主价 */
+/** 形式电荷修正后的目标价（用于隐式氢与孤对电子估算） */
 function targetValence(element: string, charge: number): number {
   let v = BASE_VALENCE[element]?.[0] ?? 1
-  // 常见电荷修正：O⁻/N⁻ 价不变（用于负电荷提示），正电荷原子按主价处理
+  // 负电荷氧（醇盐 / 酚盐 / 羧酸根）：只成 1 根键，且不再带氢
+  if (element === 'O' && charge < 0) return 1
+  // 正电荷氧/硫：价降低 1（如 H₃O⁺ 之外的常见形态）
   if (charge > 0 && (element === 'O' || element === 'S')) v = Math.max(1, v - 1)
   return v
 }
